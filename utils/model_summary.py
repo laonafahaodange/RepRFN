@@ -6,6 +6,22 @@ import numpy as np
 ---- 1) FLOPs: floating point operations
 ---- 2) #Activations: the number of elements of all ‘Conv2d’ outputs
 ---- 3) #Conv2d: the number of ‘Conv2d’ layers
+# --------------------------------------------
+# Kai Zhang (github: https://github.com/cszn)
+# 21/July/2020
+# --------------------------------------------
+# Reference
+https://github.com/sovrasov/flops-counter.pytorch.git
+
+# If you use this code, please consider the following citation:
+
+@inproceedings{zhang2020aim, % 
+  title={AIM 2020 Challenge on Efficient Super-Resolution: Methods and Results},
+  author={Kai Zhang and Martin Danelljan and Yawei Li and Radu Timofte and others},
+  booktitle={European Conference on Computer Vision Workshops},
+  year={2020}
+}
+# --------------------------------------------
 '''
 
 def get_model_flops(model, input_res, print_per_layer_stat=True,
@@ -31,6 +47,7 @@ def get_model_flops(model, input_res, print_per_layer_stat=True,
 
 def get_model_activation(model, input_res, input_constructor=None):
     assert type(input_res) is tuple, 'Please provide the size of the input image.'
+    # why >=3? rather than ==3?
     assert len(input_res) >= 3, 'Input image should have 3 dimensions.'
     activation_model = add_activation_counting_methods(model)
     activation_model.eval().start_activation_count()

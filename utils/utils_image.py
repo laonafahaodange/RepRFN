@@ -9,6 +9,12 @@ from datetime import datetime
 # import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 
+'''
+modified by Kai Zhang (github: https://github.com/cszn)
+03/03/2019
+https://github.com/twhui/SRGAN-pyTorch
+https://github.com/xinntao/BasicSR
+'''
 
 IMG_EXTENSIONS = ['.jpg', '.JPG', '.jpeg', '.JPEG', '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP']
 
@@ -121,6 +127,7 @@ def imread_uint(path, n_channels=3):
         img = np.expand_dims(img, axis=2)  # HxWx1
     elif n_channels == 3:
         img = cv2.imread(path, cv2.IMREAD_UNCHANGED)  # BGR or G
+        # 如果是灰度图，则ndim=2，表示HW
         if img.ndim == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)  # GGG
         else:
@@ -128,10 +135,52 @@ def imread_uint(path, n_channels=3):
     return img
 
 
+# TODO: 新增的对输入图像的处理
+def read_img_v2(path, data_range, data_format, dtype=np.uint8):
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)  # BGR or G
+    # if gray
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)  # GGG
+        img = img.astype(np.float32) / (255. / data_range)
+        img = img.astype(dtype)
+        return img
+
+    # some images have 4 channels
+    if img.shape[2] > 3:
+        img = img[:, :, :3]  # RGBA->RGB
+        if data_format == 'bgr':
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # RGB->BGA
+        elif data_format == 'ycbcr':
+            img = rgb2ycbcr(img, only_y=False)  # RGB->YCBCR
+    # if bgr
+    else:
+        if data_format == 'rgb':
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # BGR->RGB
+        elif data_format == 'ycbcr':
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # BGR->RGB->YCBCR
+            img = rgb2ycbcr(img, only_y=False)
+
+    img = img.astype(np.float32) / (255. / data_range)
+    img = img.astype(dtype)
+    return img
+
+
 def imsave(img, img_path):
     img = np.squeeze(img)
     if img.ndim == 3:
         img = img[:, :, [2, 1, 0]]
+    cv2.imwrite(img_path, img)
+
+
+# TODO: 新增保存图像的函数
+def imsave_v2(img, img_path, data_format):
+    img = np.squeeze(img)
+    if img.ndim == 3:
+        if data_format == 'rgb':
+            img = img[:, :, [2, 1, 0]]
+        elif data_format == 'ycbcr':
+            img = ycbcr2rgb(img)
+            img = img[:, :, [2, 1, 0]]
     cv2.imwrite(img_path, img)
 
 
@@ -150,28 +199,23 @@ def imsave(img, img_path):
 
 
 def uint2single(img):
-
-    return np.float32(img/255.)
+    return np.float32(img / 255.)
 
 
 def uint2single1(img):
-
-    return np.float32(np.squeeze(img)/255.)
+    return np.float32(np.squeeze(img) / 255.)
 
 
 def single2uint(img):
-
-    return np.uint8((img.clip(0, 1)*255.).round())
+    return np.uint8((img.clip(0, 1) * 255.).round())
 
 
 def uint162single(img):
-
-    return np.float32(img/65535.)
+    return np.float32(img / 65535.)
 
 
 def single2uint16(img):
-
-    return np.uint8((img.clip(0, 1)*65535.).round())
+    return np.uint8((img.clip(0, 1) * 65535.).round())
 
 
 # --------------------------------
@@ -184,7 +228,13 @@ def single2uint16(img):
 def uint2tensor4(img, data_range):
     if img.ndim == 2:
         img = np.expand_dims(img, axis=2)
-    return torch.from_numpy(np.ascontiguousarray(img)).permute(2, 0, 1).float().div(255./data_range).unsqueeze(0)
+    # ascontiguousarray: 将一个内存不连续存储的数组转换为内存连续存储的数组，使得运行速度更快
+    # from_numpy: np->tensor
+    # permute: HWC->CHW
+    # float: 转为浮点型
+    # div: 所有元素除以参数。data_range=1时除以255；data_range=255时除以1
+    # unsqueeze: CHW->BCHW
+    return torch.from_numpy(np.ascontiguousarray(img)).permute(2, 0, 1).float().div(255. / data_range).unsqueeze(0)
 
 
 # convert uint (HxWxn_channels) to 3-dimensional torch tensor
@@ -196,10 +246,20 @@ def uint2tensor3(img):
 
 # convert torch tensor to uint
 def tensor2uint(img, data_range):
-    img = img.data.squeeze().float().clamp_(0, 1*data_range).cpu().numpy()
+    # squeeze: BCHW->CHW
+    # float: 数据类型转为浮点型
+    # clamp_: 将数据范围限制在0-1*data_range
+    # cpu+numpy: 将数据先转移到cpu再从tensor转回numpy，因为numpy只能在cpu上处理
+    img = img.data.squeeze().float().clamp_(0, 1 * data_range).cpu().numpy()
+    # 如果是彩色图像，则CHW->HWC
     if img.ndim == 3:
         img = np.transpose(img, (1, 2, 0))
-    return np.uint8((img*255.0/data_range).round())
+    # data_range=1时表示模型训练的时候将0-255的图片转为了0-1的tensor
+    # 那么恢复的时候就乘以255再round四舍五入取整
+    # data_range=255时表示模型训练的时候不做任何处理直接转为0-255的tensor
+    # 因此恢复的时候乘以1再round四舍五入取整
+    # 最后都是转为uint8数据类型
+    return np.uint8((img * 255.0 / data_range).round())
 
 
 # --------------------------------
@@ -225,6 +285,7 @@ def tensor2single(img):
         img = np.transpose(img, (1, 2, 0))
 
     return img
+
 
 def tensor2single3(img):
     img = img.data.squeeze().float().clamp_(0, 1).cpu().numpy()
@@ -291,26 +352,34 @@ def augment_img(img, mode=0):
 
 
 def augment_img_np3(img, mode=0):
+    # 原图
     if mode == 0:
         return img
+    # 逆时针旋转90°
     elif mode == 1:
         return img.transpose(1, 0, 2)
+    # 垂直翻转
     elif mode == 2:
         return img[::-1, :, :]
+    # 垂直翻转+逆时针旋转90°
     elif mode == 3:
         img = img[::-1, :, :]
         img = img.transpose(1, 0, 2)
         return img
+    # 水平翻转
     elif mode == 4:
         return img[:, ::-1, :]
+    # 水平翻转+逆时针旋转90°
     elif mode == 5:
         img = img[:, ::-1, :]
         img = img.transpose(1, 0, 2)
         return img
+    # 水平翻转+垂直翻转
     elif mode == 6:
         img = img[:, ::-1, :]
         img = img[::-1, :, :]
         return img
+    # 水平翻转+垂直翻转+逆时针旋转90°
     elif mode == 7:
         img = img[:, ::-1, :]
         img = img[::-1, :, :]
@@ -351,6 +420,24 @@ def augment_imgs(img_list, hflip=True, rot=True):
         return img
 
     return [_augment(img) for img in img_list]
+
+
+# TODO: 新增对单幅图像的增强
+def augment_img_v2(img_lr, img_gt, hflip=True, rot=True):
+    # horizontal flip OR rotate
+    hflip = hflip and random.random() < 0.5
+    vflip = rot and random.random() < 0.5
+    rot90 = rot and random.random() < 0.5
+    if hflip:
+        img_lr = img_lr[:, ::-1, :]
+        img_gt = img_gt[:, ::-1, :]
+    if vflip:
+        img_lr = img_lr[::-1, :, :]
+        img_gt = img_gt[::-1, :, :]
+    if rot90:
+        img_lr = img_lr.transpose(1, 0, 2)
+        img_gt = img_gt.transpose(1, 0, 2)
+    return img_lr, img_gt
 
 
 '''
@@ -434,6 +521,7 @@ def bgr2ycbcr(img, only_y=True):
 
 
 def modcrop(img_in, scale):
+    # 将图片裁剪成scale的整数倍
     # img_in: Numpy, HWC or HW
     img = np.copy(img_in)
     if img.ndim == 2:
@@ -453,7 +541,7 @@ def shave(img_in, border=0):
     # img_in: Numpy, HWC or HW
     img = np.copy(img_in)
     h, w = img.shape[:2]
-    img = img[border:h-border, border:w-border]
+    img = img[border:h - border, border:w - border]
     return img
 
 
@@ -486,12 +574,12 @@ def calculate_psnr(img1, img2, border=0):
     if not img1.shape == img2.shape:
         raise ValueError('Input images must have the same dimensions.')
     h, w = img1.shape[:2]
-    img1 = img1[border:h-border, border:w-border]
-    img2 = img2[border:h-border, border:w-border]
+    img1 = img1[border:h - border, border:w - border]
+    img2 = img2[border:h - border, border:w - border]
 
     img1 = img1.astype(np.float64)
     img2 = img2.astype(np.float64)
-    mse = np.mean((img1 - img2)**2)
+    mse = np.mean((img1 - img2) ** 2)
     if mse == 0:
         return float('inf')
     return 20 * math.log10(255.0 / math.sqrt(mse))
@@ -508,8 +596,8 @@ def calculate_ssim(img1, img2, border=0):
     if not img1.shape == img2.shape:
         raise ValueError('Input images must have the same dimensions.')
     h, w = img1.shape[:2]
-    img1 = img1[border:h-border, border:w-border]
-    img2 = img2[border:h-border, border:w-border]
+    img1 = img1[border:h - border, border:w - border]
+    img2 = img2[border:h - border, border:w - border]
 
     if img1.ndim == 2:
         return ssim(img1, img2)
@@ -526,21 +614,24 @@ def calculate_ssim(img1, img2, border=0):
 
 
 def ssim(img1, img2):
-    C1 = (0.01 * 255)**2
-    C2 = (0.03 * 255)**2
+    C1 = (0.01 * 255) ** 2
+    C2 = (0.03 * 255) ** 2
 
     img1 = img1.astype(np.float64)
     img2 = img2.astype(np.float64)
+    # 根据参数构造一维高斯核
     kernel = cv2.getGaussianKernel(11, 1.5)
+    # 根据一维高斯核构造二维高斯核
     window = np.outer(kernel, kernel.transpose())
-
+    # filter2D会默认填充图像使得输出尺寸和输入保持一致
+    # 我们需要的是没有涉及填充部分的输出，因此可以套用卷积尺寸公式out_size=input_size-kernel_size+1
     mu1 = cv2.filter2D(img1, -1, window)[5:-5, 5:-5]  # valid
     mu2 = cv2.filter2D(img2, -1, window)[5:-5, 5:-5]
-    mu1_sq = mu1**2
-    mu2_sq = mu2**2
+    mu1_sq = mu1 ** 2
+    mu2_sq = mu2 ** 2
     mu1_mu2 = mu1 * mu2
-    sigma1_sq = cv2.filter2D(img1**2, -1, window)[5:-5, 5:-5] - mu1_sq
-    sigma2_sq = cv2.filter2D(img2**2, -1, window)[5:-5, 5:-5] - mu2_sq
+    sigma1_sq = cv2.filter2D(img1 ** 2, -1, window)[5:-5, 5:-5] - mu1_sq
+    sigma2_sq = cv2.filter2D(img2 ** 2, -1, window)[5:-5, 5:-5] - mu2_sq
     sigma12 = cv2.filter2D(img1 * img2, -1, window)[5:-5, 5:-5] - mu1_mu2
 
     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) *
@@ -558,10 +649,10 @@ def ssim(img1, img2):
 # matlab 'imresize' function, now only support 'bicubic'
 def cubic(x):
     absx = torch.abs(x)
-    absx2 = absx**2
-    absx3 = absx**3
-    return (1.5*absx3 - 2.5*absx2 + 1) * ((absx <= 1).type_as(absx)) + \
-        (-0.5*absx3 + 2.5*absx2 - 4*absx + 2) * (((absx > 1)*(absx <= 2)).type_as(absx))
+    absx2 = absx ** 2
+    absx3 = absx ** 3
+    return (1.5 * absx3 - 2.5 * absx2 + 1) * ((absx <= 1).type_as(absx)) + \
+           (-0.5 * absx3 + 2.5 * absx2 - 4 * absx + 2) * (((absx > 1) * (absx <= 2)).type_as(absx))
 
 
 def calculate_weights_indices(in_length, out_length, scale, kernel, kernel_width, antialiasing):
@@ -768,5 +859,61 @@ def imresize_np(img, scale, antialiasing=True):
     return out_2.numpy()
 
 
+# --------------------------------
+# self-ensemble for test
+# --------------------------------
+def forward_x8(lr_img, args, forward_function=None):
+    def _transform(v, op):
+        if args.precision != 'single': v = v.float()
+
+        v2np = v.data.cpu().numpy()
+        if op == 'v':
+            tfnp = v2np[:, :, :, ::-1].copy()
+        elif op == 'h':
+            tfnp = v2np[:, :, ::-1, :].copy()
+        elif op == 't':
+            tfnp = v2np.transpose((0, 1, 3, 2)).copy()
+
+        ret = torch.Tensor(tfnp).to(lr_img.device)
+        if args.precision == 'half': ret = ret.half()
+
+        return ret
+
+    self_ensemble_list = ['v', 'h', 't', 'hv', 'tv', 'th', 'thv']
+
+    list_x = [lr_img]
+    for tf in self_ensemble_list:
+        tf_len=len(tf)
+        if tf_len==1:
+            list_x.extend([_transform(lr_img, tf)])
+        elif tf_len==2:
+            list_x.extend([_transform(_transform(lr_img, tf[0]),tf[1])])
+        elif tf_len==3:
+            list_x.extend([_transform(_transform(_transform(lr_img, tf[0]), tf[1]),tf[2])])
+
+    list_y = []
+    for x in list_x:
+        y = forward_function(x)
+        list_y.append(y)
+
+    for i in range(len(list_y)):
+        if i == 0:
+            continue
+        tf=self_ensemble_list[i - 1]
+        tf_len=len(tf)
+        if tf_len==1:
+            list_y[i]=_transform(list_y[i], tf)
+        elif tf_len==2:
+            list_y[i]=_transform(_transform(list_y[i], tf[1]),tf[0])
+        elif tf_len==3:
+            list_y[i] =_transform(_transform(_transform(list_y[i], tf[2]), tf[1]),tf[0])
+
+    y = [torch.cat(list_y, dim=0).mean(dim=0, keepdim=True)]
+
+    if len(y) == 1: y = y[0]
+
+    return y
+
+
 if __name__ == '__main__':
-    img = imread_uint('test.bmp',3)
+    img = imread_uint('test.bmp', 3)
