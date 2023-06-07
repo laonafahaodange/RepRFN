@@ -1,7 +1,21 @@
 # RepRFN
-Reparameterized Residual Feature Network For Lightweight Image Super-Resolution
+## Reparameterized Residual Feature Network For Lightweight Image Super-Resolution
+Weijian Deng, Hongjie Yuan, Lunhui Deng, Zengtong Lu; Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) Workshops, 2023, pp. 1712-1721
 
 用于轻量化超分辨率的重参数残差特征网络（RepRFN）
+
+如果论文或项目对您有所帮助，欢迎引用。
+[论文地址](https://openaccess.thecvf.com/content/CVPR2023W/NTIRE/html/Deng_Reparameterized_Residual_Feature_Network_for_Lightweight_Image_Super-Resolution_CVPRW_2023_paper.html)
+```
+@InProceedings{Deng_2023_CVPR,
+    author    = {Deng, Weijian and Yuan, Hongjie and Deng, Lunhui and Lu, Zengtong},
+    title     = {Reparameterized Residual Feature Network for Lightweight Image Super-Resolution},
+    booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) Workshops},
+    month     = {June},
+    year      = {2023},
+    pages     = {1712-1721}
+}
+```
 
 ---
 **更新日志**
